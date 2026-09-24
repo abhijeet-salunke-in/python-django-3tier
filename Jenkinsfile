@@ -1,50 +1,107 @@
 pipeline {
+
     agent any
 
     environment {
-        DOCKERHUB_USER = 'YOUR_DOCKERHUB_USERNAME'
-        FRONTEND_IMAGE = "${DOCKERHUB_USER}/python-django-frontend"
-        BACKEND_IMAGE  = "${DOCKERHUB_USER}/python-django-backend"
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        DOCKER_USERNAME = 'abhisalunke16'
+
+        FRONTEND_IMAGE = 'abhisalunke16/python-django-3tier-frontend'
+        BACKEND_IMAGE  = 'abhisalunke16/python-django-3tier-backend'
+
+        IMAGE_TAG = "v${BUILD_NUMBER}"
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: 'main',
+                    url: 'https://github.com/abhijeet-salunke-in/python-django-3tier.git'
             }
         }
 
-        stage('Code Quality') {
+        stage('SonarQube Analysis') {
             steps {
-                echo 'Run SonarQube analysis here.'
-            }
-        }
-
-        stage('Build Backend Image') {
-            steps {
-                sh 'docker build -t ${BACKEND_IMAGE}:${IMAGE_TAG} ./backend'
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        sonar-scanner \
+                        -Dsonar.projectKey=python-django-3tier \
+                        -Dsonar.projectName=python-django-3tier \
+                        -Dsonar.sources=.
+                    '''
+                }
             }
         }
 
         stage('Build Frontend Image') {
             steps {
-                sh 'docker build -t ${FRONTEND_IMAGE}:${IMAGE_TAG} ./frontend'
+                sh '''
+                    docker build \
+                    -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
+                    ./frontend
+                '''
             }
         }
 
-        stage('Push Images') {
+        stage('Build Backend Image') {
             steps {
-                echo 'Authenticate with Docker Hub using Jenkins credentials before pushing.'
-                sh 'docker push ${BACKEND_IMAGE}:${IMAGE_TAG}'
-                sh 'docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}'
+                sh '''
+                    docker build \
+                    -t ${BACKEND_IMAGE}:${IMAGE_TAG} \
+                    ./backend
+                '''
             }
         }
 
-        stage('Deploy') {
+        stage('Docker Login & Push') {
             steps {
-                echo 'Deploy Kubernetes manifests and update image tags here.'
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'docker_hub',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+
+                    sh '''
+                        echo "$DOCKER_PASSWORD" | docker login \
+                        -u "$DOCKER_USER" \
+                        --password-stdin
+
+                        docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                        docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
+                    '''
+                }
             }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                    kubectl apply -f k8s/
+                '''
+            }
+        }
+
+        stage('Verify Kubernetes Deployment') {
+            steps {
+                sh '''
+                    kubectl get pods
+                    kubectl get deployments
+                    kubectl get services
+                '''
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo 'Django 3-Tier CI/CD pipeline completed successfully.'
+        }
+
+        failure {
+            echo 'Django 3-Tier CI/CD pipeline failed.'
         }
     }
 }
