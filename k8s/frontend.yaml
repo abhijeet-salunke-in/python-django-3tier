@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: YOUR_DOCKERHUB_USERNAME/python-django-frontend:v1
+          image: abhisalunke16/python-django-frontend:v1
           ports:
             - containerPort: 80
 ---
